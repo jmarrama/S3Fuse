@@ -1,10 +1,8 @@
 package main
 
 import (
-	"archive/zip"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -46,24 +44,13 @@ func main() {
 func mount(path, mountpoint string) error {
 
 	// Rough outline:
-	// TODO - make conf format and parse it and dump it all in a struct
-	// TODO - hook it all into the fuse FS interface
 	// TODO - actually implement reading files from S3 w/ readahead and other stuff in conf
 
 	rootFs, err := LoadFileSystem(path)
 	if err != nil {
 		return err
 	}
-	fmt.Println(rootFs)
-	return nil
-
-
-	/*
-	archive, err := zip.OpenReader(path)
-	if err != nil {
-		return err
-	}
-	defer archive.Close()
+	//fmt.Println(rootFs)
 
 	c, err := fuse.Mount(mountpoint)
 	if err != nil {
@@ -72,7 +59,7 @@ func mount(path, mountpoint string) error {
 	defer c.Close()
 
 	filesys := &FS{
-		archive: &archive.Reader,
+		rootNode: &rootFs,
 	}
 	if err := fs.Serve(c, filesys); err != nil {
 		return err
@@ -85,91 +72,91 @@ func mount(path, mountpoint string) error {
 	}
 
 	return nil
-	*/
 }
 
 type FS struct {
-	archive *zip.Reader
+	rootNode *S3VirtualDir
 }
 
 var _ fs.FS = (*FS)(nil)
 
 
 func (f *FS) Root() (fs.Node, error) {
-	// TODO - store root s3 virtual dir in the FS struct
 	n := &Dir{
-		archive: f.archive,
+		node: f.rootNode,
 	}
 	return n, nil
 }
 
 type Dir struct {
-	archive *zip.Reader
-	// nil for the root directory, which has no entry in the zip
-	file *zip.File
+	node *S3VirtualDir
 }
 
 var _ fs.Node = (*Dir)(nil)
 
-func zipAttr(f *zip.File) fuse.Attr {
-	return fuse.Attr{
-		Size:   f.UncompressedSize64,
-		Mode:   f.Mode(),
-		Mtime:  f.ModTime(),
-		Ctime:  f.ModTime(),
-		Crtime: f.ModTime(),
-	}
-}
-
 func (d *Dir) Attr(ctx context.Context, attr *fuse.Attr) error {
-	// TODO - just return the one for root here
-	if d.file == nil {
-		// root directory
-		*attr = fuse.Attr{Mode: os.ModeDir | 0755}
-		return nil
-	}
-	*attr = zipAttr(d.file)
+	// everything is read only in this FS
+	*attr = fuse.Attr{Mode: os.ModeDir | 0555}
 	return nil
 }
 
 var _ = fs.NodeRequestLookuper(&Dir{})
 
 func (d *Dir) Lookup(ctx context.Context, req *fuse.LookupRequest, resp *fuse.LookupResponse) (fs.Node, error) {
-	// TODO - split path into parts, simply traverse from current dir onwards
-	path := req.Name
-	if d.file != nil {
-		path = d.file.Name + path
-	}
-	for _, f := range d.archive.File {
-		switch {
-		case f.Name == path:
-			child := &File{
-				file: f,
+	pathComps := strings.Split(req.Name, "/")
+	isCurNodeFile := false
+	curDir := d.node
+	curFile := &S3File{}
+
+	for _, curPathComp := range pathComps {
+
+		if isCurNodeFile {
+			return nil, fuse.ENOENT
+		}
+
+		found := false
+
+		// TODO - migrate data model to put dirs and files under the same supertype, this is so ugly
+		// search for curPathComp in this directory's children
+		for _, cdir := range curDir.ChildDirs {
+			if strings.Compare(cdir.Name, curPathComp) == 0 {
+				curDir = &cdir
+				found = true
+				break
 			}
-			return child, nil
-		case f.Name[:len(f.Name)-1] == path && f.Name[len(f.Name)-1] == '/':
-			child := &Dir{
-				archive: d.archive,
-				file:    f,
+		}
+		for _, cfile := range curDir.ChildFiles {
+			if strings.Compare(cfile.Name, curPathComp) == 0 {
+				curFile = &cfile
+				isCurNodeFile = true
+				found = true
+				break
 			}
-			return child, nil
+		}
+
+		if found == false {
+			return nil, fuse.ENOENT
 		}
 	}
-	return nil, fuse.ENOENT
+
+	if isCurNodeFile {
+		return &File{curFile}, nil
+	}
+	return &Dir{curDir}, nil
 }
 
 type File struct {
-	file *zip.File
+	node *S3File
 }
 
 var _ fs.Node = (*File)(nil)
 
 func (f *File) Attr(ctx context.Context, attr *fuse.Attr) error {
-	// TODO - just return read only 444....
-	*attr = zipAttr(f.file)
+	*attr = fuse.Attr{Mode: os.ModeDir | 0444}
 	return nil
 }
 
+/*
 var _ = fs.NodeOpener(&File{})
 
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
@@ -181,7 +168,9 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	resp.Flags |= fuse.OpenNonSeekable
 	return &FileHandle{r: r}, nil
 }
+*/
 
+/*
 type FileHandle struct {
 	r io.ReadCloser
 }
@@ -206,38 +195,25 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	resp.Data = buf[:n]
 	return err
 }
+*/
 
 var _ = fs.HandleReadDirAller(&Dir{})
 
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	// TODO - simply just hand back merged lists of files and directories
-	prefix := ""
-	if d.file != nil {
-		prefix = d.file.Name
-	}
-
 	var res []fuse.Dirent
-	for _, f := range d.archive.File {
-		if !strings.HasPrefix(f.Name, prefix) {
-			continue
-		}
-		name := f.Name[len(prefix):]
-		if name == "" {
-			// the dir itself, not a child
-			continue
-		}
-		if strings.ContainsRune(name[:len(name)-1], '/') {
-			// contains slash in the middle -> is in a deeper subdir
-			continue
-		}
+
+	for _, d := range d.node.ChildDirs {
 		var de fuse.Dirent
-		if name[len(name)-1] == '/' {
-			// directory
-			name = name[:len(name)-1]
-			de.Type = fuse.DT_Dir
-		}
-		de.Name = name
+		de.Type = fuse.DT_Dir
+		de.Name = d.Name
 		res = append(res, de)
+	}
+	for _, f := range d.node.ChildFiles {
+		var fe fuse.Dirent
+		fe.Type = fuse.DT_File
+		fe.Name = f.Name
+		res = append(res, fe)
+
 	}
 	return res, nil
 }
