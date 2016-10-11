@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/context"
 	"io/ioutil"
 	"encoding/json"
+	"net/http"
 )
 
 var progName = filepath.Base(os.Args[0])
@@ -34,6 +35,7 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	defer println("ending")
 	path := flag.Arg(0)
 	mountpoint := flag.Arg(1)
 	if err := mount(path, mountpoint); err != nil {
@@ -152,27 +154,33 @@ type File struct {
 var _ fs.Node = (*File)(nil)
 
 func (f *File) Attr(ctx context.Context, attr *fuse.Attr) error {
-	*attr = fuse.Attr{Mode: os.ModeDir | 0444}
+	*attr = fuse.Attr{Mode: 0444}
 	return nil
 }
 
-/*
 var _ = fs.NodeOpener(&File{})
 
 func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fs.Handle, error) {
-	r, err := f.file.Open()
+	httpResp, err := http.Get(f.node.Url)
 	if err != nil {
 		return nil, err
 	}
-	// individual entries inside a zip file are not seekable
+	println("opened file %s with http resp %d", f.node.Name, httpResp.StatusCode)
+	// lets deal with seek later?
 	resp.Flags |= fuse.OpenNonSeekable
-	return &FileHandle{r: r}, nil
+	return &FileHandle{
+		resp: httpResp,
+		pos: 0,
+		buf: make([]byte, bufSize),
+	}, nil
 }
-*/
 
-/*
+const bufSize = 1000000 // lets just hardcode size for now....
+
 type FileHandle struct {
-	r io.ReadCloser
+	resp *http.Response
+	buf []byte
+	pos uint64
 }
 
 var _ fs.Handle = (*FileHandle)(nil)
@@ -180,22 +188,25 @@ var _ fs.Handle = (*FileHandle)(nil)
 var _ fs.HandleReleaser = (*FileHandle)(nil)
 
 func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
-	return fh.r.Close()
+	return fh.resp.Body.Close()
 }
 
 var _ = fs.HandleReader(&FileHandle{})
 
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	// We don't actually enforce Offset to match where previous read
-	// ended. Maybe we should, but that would mean'd we need to track
-	// it. The kernel *should* do it for us, based on the
-	// fuse.OpenNonSeekable flag.
-	buf := make([]byte, req.Size)
-	n, err := fh.r.Read(buf)
-	resp.Data = buf[:n]
+	//offset := req.Offset
+	println("read was called")
+	sizeRequested := req.Size
+
+	if (sizeRequested > bufSize) {
+		sizeRequested = bufSize
+	}
+
+	bytesRead, err := fh.resp.Body.Read(fh.buf)
+	println("read %d bytes", bytesRead)
+	resp.Data = fh.buf[:bytesRead]
 	return err
 }
-*/
 
 var _ = fs.HandleReadDirAller(&Dir{})
 
