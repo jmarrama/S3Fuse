@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"io"
+	"github.com/glycerine/rbuf"
 )
 
 var progName = filepath.Base(os.Args[0])
@@ -170,21 +171,60 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 		return nil, err
 	}
 	println("opened file %s with http resp %d", f.node.Name, httpResp.StatusCode)
+
 	// lets deal with seek later?
 	resp.Flags |= fuse.OpenNonSeekable
-	return &FileHandle{
+	println(f.node.BufferSize)
+
+	fh := &FileHandle{
 		resp: httpResp,
 		pos: 0,
-		buf: make([]byte, bufSize),
-	}, nil
-}
+		ringbuf: rbuf.NewAtomicFixedSizeRingBuf(f.node.BufferSize),
+		bufsize: f.node.BufferSize,
+	}
 
-const bufSize = 1000000 // lets just hardcode size for now....
+	// spin up background function to continually read in the response to the ring buffer
+	go func() {
+		println("starting background resp")
+		intbuf := make([]byte, 100000) // just make a 100k buffer for response chunks
+		for {
+			bytesRead, err := httpResp.Body.Read(intbuf)
+			println("NETWORK read from network %d bytes", bytesRead)
+
+			if err != nil && err != io.EOF {
+				break
+			}
+
+			bytesWrittenToRing := 0
+			for (bytesWrittenToRing < bytesRead) {
+				toWrite := intbuf[bytesWrittenToRing:bytesRead]
+				//fmt.Fprint(os.Stderr, "attempting to write slide of %d length", len(toWrite))
+				bWritten, rerr := fh.ringbuf.Write(toWrite)
+				bytesWrittenToRing = bytesWrittenToRing + bWritten
+				//fmt.Fprintf(os.Stderr, "NETWORK bytes to ring: %d %d", bytesWrittenToRing, bytesRead)
+
+				if rerr != nil && rerr != io.ErrShortWrite {
+					panic(rerr)
+				}
+				if rerr == io.ErrShortWrite {
+					//fmt.Fprintf(os.Stderr, "RING BUFFER IS FULL")
+				}
+			}
+
+			if err == io.EOF {
+				break
+			}
+		}
+	} ()
+
+	return fh, nil
+}
 
 type FileHandle struct {
 	resp *http.Response
-	buf []byte
 	pos uint64
+	ringbuf *rbuf.AtomicFixedSizeRingBuf
+	bufsize int
 }
 
 var _ fs.Handle = (*FileHandle)(nil)
@@ -202,14 +242,14 @@ func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fus
 	sizeRequested := req.Size
 	println("READ: offset and size requested:", offset, sizeRequested)
 
-	if (sizeRequested > bufSize) {
-		sizeRequested = bufSize
+	if (sizeRequested > fh.bufsize) {
+		sizeRequested = fh.bufsize
 	}
 
-	bytesRead, err := fh.resp.Body.Read(fh.buf[:sizeRequested])
-	println("read %d bytes", bytesRead, err)
-	resp.Data = make([]byte, bytesRead)
-	copy(resp.Data, fh.buf)
+	respBuf := make([]byte, sizeRequested)
+	bytesRead, err := fh.ringbuf.Read(respBuf)
+	println("read from ringbuf %d bytes", bytesRead, err)
+	resp.Data = respBuf[:bytesRead]
 
 	if (err == io.EOF) {
 		println("eof encountered")
@@ -261,7 +301,7 @@ type S3File struct {
 	ParentDirInum int
 	Url string
 	Size uint64
-	BufferSize uint64
+	BufferSize int
 }
 
 type S3VirtualDir struct {
@@ -304,13 +344,14 @@ func buildDirNode(curNode JsonFileNode, nodeMap map[int]JsonFileNode) S3VirtualD
 			if node.IsDir == 1 {
 				childDirs = append(childDirs, buildDirNode(node, nodeMap))
 			} else {
+				println(node.BufSize)
 				childFiles = append(childFiles, S3File{
 					Name: node.Name,
 					Url: node.Url,
 					ParentDirInum: curNode.Inode,
 					Inum: node.Inode,
 					Size: node.Size,
-					BufferSize: node.BufSize,
+					BufferSize: 10000000,
 				})
 			}
 		}

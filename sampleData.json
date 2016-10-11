@@ -59,7 +59,7 @@
     "name": "task.json",
     "parent": 2,
     "size": 780,
-    "buffersize": 1000,
+    "buffersize": 1000000,
     "url": "https://s3.amazonaws.com/data.kariusdx.com/00058e9c2ec9dcc60a2980ab032a002949e75cad/task.json?AWSAccessKeyId=AKIAJL3D3M74ECA6XBRQ&Expires=1562606492&Signature=kTCCwhg779MXC52Wabl5oz4v0Jw%3D"
   }
 ]
