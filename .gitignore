@@ -1,0 +1,5 @@
+.idea/
+*.swp
+mount/
+archive.zip
+s3fuse
