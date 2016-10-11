@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# I doubt this actually works on OS X
+if [[ $(uname) != "Linux" ]]; then
+    OS=darwin
+else
+    OS=linux
+fi
+
+# Install
+# ./docker get -u bazil.org/fuse/fs
+# ./docker get -u golang.org/x/net/context
+
+# Build
+# ./docker build --ldflags "-linkmode external -extldflags -static" src/s3fuse.go
+
+# Running
+# ./s3fuse sampleData.json m1
+# sudo umount m1
+
+DIR="/go/src/github.com/jmarrama/S3Fuse"
+ENTRYPOINT=${ENTRYPOINT:-go}
+DOCKER_ARGS="--cap-add MKNOD --cap-add SYS_ADMIN --device /dev/fuse"
+
+docker run -e "XC_OS=$OS" $DOCKER_ARGS \
+          -v "$PWD:$DIR" \
+          -w "$DIR" \
+          -v /tmp/go:/go \
+          -e GOBIN=/go/bin -e GOPATH=/go \
+          --entrypoint "$ENTRYPOINT" \
+          kariusdx/go-alpine-fuse "$@"
+
+
