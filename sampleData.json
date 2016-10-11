@@ -4,6 +4,8 @@
     "isdir": 1,
     "name": "root",
     "parent": -1,
+    "size": 0,
+    "buffersize": 0,
     "url": ""
   },
   {
@@ -11,6 +13,8 @@
     "isdir": 1,
     "name": "foo",
     "parent": 0,
+    "size": 0,
+    "buffersize": 0,
     "url": ""
   },
   {
@@ -18,6 +22,8 @@
     "isdir": 1,
     "name": "bar",
     "parent": 1,
+    "size": 0,
+    "buffersize": 0,
     "url": ""
   },
   {
@@ -25,6 +31,8 @@
     "isdir": 0,
     "name": "seqs.fasta",
     "parent": 0,
+    "size": 342897262,
+    "buffersize": 10000000,
     "url": "https://s3.amazonaws.com/genomes.kariusdx.com/seqs.fasta?AWSAccessKeyId=AKIAJL3D3M74ECA6XBRQ&Expires=1562605681&Signature=iF2lV9mANzOJMvPYfD6jORt%2F1dc%3D"
   },
   {
@@ -32,6 +40,8 @@
     "isdir": 0,
     "name": "seqs.fasta.fai",
     "parent": 1,
+    "size": 138099327,
+    "buffersize": 1000000,
     "url": "https://s3.amazonaws.com/genomes.kariusdx.com/seqs.fasta.fai?AWSAccessKeyId=AKIAJL3D3M74ECA6XBRQ&Expires=1562606244&Signature=Eh2ECm%2Bl6Ca6bi3d0PSTvlqpIaM%3D"
   },
   {
@@ -39,6 +49,8 @@
     "isdir": 0,
     "name": "spikin.bam",
     "parent": 2,
+    "size": 30411861,
+    "buffersize": 100000,
     "url": "https://s3.amazonaws.com/data.kariusdx.com/00058e9c2ec9dcc60a2980ab032a002949e75cad/spikein.bam?AWSAccessKeyId=AKIAJL3D3M74ECA6XBRQ&Expires=1562606411&Signature=aEOjosz685QjJcE4xOoSe81LInA%3D"
   },
   {
@@ -46,6 +58,8 @@
     "isdir": 0,
     "name": "task.json",
     "parent": 2,
+    "size": 780,
+    "buffersize": 1000,
     "url": "https://s3.amazonaws.com/data.kariusdx.com/00058e9c2ec9dcc60a2980ab032a002949e75cad/task.json?AWSAccessKeyId=AKIAJL3D3M74ECA6XBRQ&Expires=1562606492&Signature=kTCCwhg779MXC52Wabl5oz4v0Jw%3D"
   }
 ]

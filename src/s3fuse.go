@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"encoding/json"
 	"net/http"
+	"io"
 )
 
 var progName = filepath.Base(os.Args[0])
@@ -154,7 +155,10 @@ type File struct {
 var _ fs.Node = (*File)(nil)
 
 func (f *File) Attr(ctx context.Context, attr *fuse.Attr) error {
-	*attr = fuse.Attr{Mode: 0444}
+	*attr = fuse.Attr{
+		Mode: 0444,
+		Size: f.node.Size,
+	}
 	return nil
 }
 
@@ -194,17 +198,23 @@ func (fh *FileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) err
 var _ = fs.HandleReader(&FileHandle{})
 
 func (fh *FileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	//offset := req.Offset
-	println("read was called")
+	offset := req.Offset
 	sizeRequested := req.Size
+	println("READ: offset and size requested:", offset, sizeRequested)
 
 	if (sizeRequested > bufSize) {
 		sizeRequested = bufSize
 	}
 
-	bytesRead, err := fh.resp.Body.Read(fh.buf)
-	println("read %d bytes", bytesRead)
-	resp.Data = fh.buf[:bytesRead]
+	bytesRead, err := fh.resp.Body.Read(fh.buf[:sizeRequested])
+	println("read %d bytes", bytesRead, err)
+	resp.Data = make([]byte, bytesRead)
+	copy(resp.Data, fh.buf)
+
+	if (err == io.EOF) {
+		println("eof encountered")
+		return nil
+	}
 	return err
 }
 
@@ -237,6 +247,8 @@ type JsonFileNode struct {
 	Name string `json:name`
 	Parent int `json:parent`
 	Url string `json:url`
+	Size uint64 `json:size`
+	BufSize uint64 `json:buffersize`
 }
 
 type JsonFileNodes struct {
@@ -248,6 +260,8 @@ type S3File struct {
 	Name string
 	ParentDirInum int
 	Url string
+	Size uint64
+	BufferSize uint64
 }
 
 type S3VirtualDir struct {
@@ -295,6 +309,8 @@ func buildDirNode(curNode JsonFileNode, nodeMap map[int]JsonFileNode) S3VirtualD
 					Url: node.Url,
 					ParentDirInum: curNode.Inode,
 					Inum: node.Inode,
+					Size: node.Size,
+					BufferSize: node.BufSize,
 				})
 			}
 		}
